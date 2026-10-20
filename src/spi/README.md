@@ -19,6 +19,6 @@ USB serial 115200 accepts preview controls; see ../../docs/UI.md.
 Backlight uses LEDC channel 0, 20kHz, 8-bit duty, default 75% brightness.
 Updates are paced at 30 FPS; this is a target, not a hardware-verified result.
 40MHz pixel-only transfer time is 22.016ms. No TE synchronization is available.
-Network casting and joystick input are not implemented.
+Network casting is not implemented. Joystick GPIO12..16 is handled in src/input.
 
 Build using PlatformIO: pio run.

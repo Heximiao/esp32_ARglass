@@ -30,7 +30,9 @@ void navigate(Page page) {
 }
 void begin() { photos().begin(); navigate(Page::Home); }
 void tick() { if (current == Page::Animation) animation::tick(); }
-void input(Input event) {
+void input(Input event, bool repeated) {
+    // Animation directions toggle options; do not toggle repeatedly while held.
+    if (repeated && current == Page::Animation) return;
     switch (current) {
         case Page::Home: home::input(event); break;
         case Page::Album: album::input(event); break;

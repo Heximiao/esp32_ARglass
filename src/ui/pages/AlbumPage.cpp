@@ -22,7 +22,7 @@ void render() {
         auto* name = label(bottom, photo->name.c_str(), 7, 1);
         lv_obj_set_width(name, viewport::Width - 148);
         lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-        auto* controls = label(bottom, "A/D next  B back", 0, 7, Muted, &lv_font_montserrat_12);
+        auto* controls = label(bottom, "L/R next  MID grid", 0, 7, Muted, &lv_font_montserrat_12);
         lv_obj_align(controls, LV_ALIGN_TOP_RIGHT, -7, 7);
         return;
     }
@@ -32,7 +32,7 @@ void render() {
         label(box, LV_SYMBOL_IMAGE, 16, 16, Accent, &lv_font_montserrat_28);
         label(box, "暂无图片", 61, 21);
         label(box, photos().status(), 16, 61, Muted, &lv_font_montserrat_12);
-        footer(root, "Upload .rgb565   B back");
+        footer(root, "Upload .rgb565  HOLD back");
         return;
     }
     const size_t first = selected / 4 * 4;
@@ -60,7 +60,7 @@ void render() {
         lv_obj_set_width(size, tileWidth - 61);
         lv_label_set_long_mode(size, LV_LABEL_LONG_DOT);
     }
-    footer(root, "WASD select   E view   B home");
+    footer(root, "Move select  MID view  HOLD back");
 }
 }
 lv_obj_t* create() {

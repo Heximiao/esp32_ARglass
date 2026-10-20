@@ -28,7 +28,7 @@ lv_obj_t* create() {
         values[i] = label(rows[i], i == 3 ? "S3 / 320x172" : "", 0, 0, Accent, &lv_font_montserrat_12);
     }
     selected = 0; refresh();
-    footer(root, "W/S select  A/D change  B home");
+    footer(root, "U/D select  L/R change  HOLD back");
     return root;
 }
 void input(Input event) {

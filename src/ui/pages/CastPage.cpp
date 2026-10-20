@@ -24,7 +24,7 @@ lv_obj_t* create() {
     message = label(root, "功能开发中", 0, 126, Muted);
     lv_obj_align(message, LV_ALIGN_TOP_MID, 0, 126);
     selected = 0; refresh();
-    footer(root, "A/D select   E details   B home");
+    footer(root, "L/R select  MID details  HOLD back");
     return root;
 }
 void input(Input event) {

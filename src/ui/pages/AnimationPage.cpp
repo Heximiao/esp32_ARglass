@@ -28,7 +28,7 @@ void render() {
         header(root, "图片动画", "NO PHOTOS");
         auto* empty = label(root, "暂无图片", 0, 0);
         lv_obj_center(empty);
-        footer(root, "Upload photos   B home");
+        footer(root, "Upload photos  HOLD back");
         return;
     }
     const bool info = preferences().animationInfo;
@@ -38,7 +38,7 @@ void render() {
         label(root, "图片动画", 12, 9);
         state = label(root, paused ? "PAUSED" : "PLAYING", 0, 12, Accent, &lv_font_montserrat_12);
         lv_obj_align(state, LV_ALIGN_TOP_RIGHT, -12, 12);
-        footer(root, "E pause  A/D photo  S speed  W info");
+        footer(root, "MID pause  L/R photo  U/D options");
     }
     const unsigned zoom = std::min(256U, std::min(112U * 256 / photo->image.header.w, 100U * 256 / photo->image.header.h));
     imageWidth = std::max(1U, photo->image.header.w * zoom / 256);

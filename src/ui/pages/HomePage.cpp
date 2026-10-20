@@ -31,7 +31,7 @@ lv_obj_t* create() {
     }
     selected = 0;
     refresh();
-    footer(root, "A/D select  E open  W settings");
+    footer(root, "L/R select  MID open  UP settings");
     return root;
 }
 void input(Input event) {
