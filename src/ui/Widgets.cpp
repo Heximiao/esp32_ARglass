@@ -34,6 +34,16 @@ lv_obj_t* pageRoot() {
     lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
     return o;
 }
+lv_obj_t* scrollArea(lv_obj_t* parent, int x, int y, int w, int h, lv_dir_t direction) {
+    auto* area = panel(parent, x, y, w, h, Background);
+    lv_obj_set_style_border_width(area, 0, 0);
+    lv_obj_set_style_radius(area, 0, 0);
+    lv_obj_add_flag(area, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(area, LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    lv_obj_set_scroll_dir(area, direction);
+    lv_obj_set_scrollbar_mode(area, LV_SCROLLBAR_MODE_OFF);
+    return area;
+}
 void header(lv_obj_t* root, const char* title, const char* status) {
     label(root, title, 12, 9);
     auto* s = label(root, status, 0, 12, Muted, &lv_font_montserrat_12);

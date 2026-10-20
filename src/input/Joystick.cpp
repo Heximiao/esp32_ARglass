@@ -41,7 +41,13 @@ void begin() {
     armed = midCycle = backSent = repeating = false;
     activeDirection = -1;
     quietSince = now;
-    Serial.println("Joystick: COM=GND UP=12 DOWN=13 LEFT=14 RIGHT=15 MID=16");
+    Serial.printf("Joystick: COM=GND UP=%u DOWN=%u LEFT=%u RIGHT=%u MID=%u\n",
+        config::UpPin, config::DownPin, config::LeftPin, config::RightPin, config::MidPin);
+}
+uint8_t pressedMask() {
+    uint8_t mask = 0;
+    for (unsigned i = 0; i < 5; ++i) if (keys[i].pressed) mask |= 1U << i;
+    return mask;
 }
 void tick() {
     const uint32_t now = millis();

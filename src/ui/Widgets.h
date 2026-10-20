@@ -12,6 +12,7 @@ lv_obj_t* panel(lv_obj_t* parent, int x, int y, int w, int h, uint32_t color = S
 lv_obj_t* label(lv_obj_t* parent, const char* text, int x, int y,
                 uint32_t color = White, const lv_font_t* font = nullptr);
 lv_obj_t* pageRoot();
+lv_obj_t* scrollArea(lv_obj_t* parent, int x, int y, int w, int h, lv_dir_t direction);
 void header(lv_obj_t* root, const char* title, const char* status);
 void footer(lv_obj_t* root, const char* text);
 void focus(lv_obj_t* object, bool selected);

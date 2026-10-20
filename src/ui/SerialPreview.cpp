@@ -14,13 +14,14 @@ void serialPreviewTick() {
             case '2': navigate(Page::Animation); break;
             case '3': navigate(Page::Cast); break;
             case '4': navigate(Page::Settings); break;
+            case '5': navigate(Page::KeyDebug); break;
             case 'w': case 'W': input(Input::Up); break;
             case 's': case 'S': input(Input::Down); break;
             case 'a': case 'A': input(Input::Left); break;
             case 'd': case 'D': input(Input::Right); break;
             case 'e': case 'E': input(Input::Confirm); break;
             case 'b': case 'B': case 27: input(Input::Back); break;
-            case '?': Serial.println("UI: 0 home, 1 album, 2 animation, 3 cast, 4 settings; WASD, E confirm, B back"); break;
+            case '?': Serial.println("UI: 0 home, 1 album, 2 animation, 3 cast, 4 settings, 5 key test; WASD, E confirm, B back"); break;
         }
     }
 }

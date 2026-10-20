@@ -5,6 +5,7 @@
 #include "pages/AnimationPage.h"
 #include "pages/CastPage.h"
 #include "pages/SettingsPage.h"
+#include "pages/KeyDebugPage.h"
 
 namespace ui {
 namespace {
@@ -21,6 +22,7 @@ void navigate(Page page) {
         case Page::Animation: next = animation::create(); break;
         case Page::Cast: next = cast::create(); break;
         case Page::Settings: next = settings::create(); break;
+        case Page::KeyDebug: next = keydebug::create(); break;
     }
     lv_obj_t* old = root ? root : lv_scr_act();
     lv_scr_load(next);
@@ -29,7 +31,10 @@ void navigate(Page page) {
     current = page;
 }
 void begin() { photos().begin(); navigate(Page::Home); }
-void tick() { if (current == Page::Animation) animation::tick(); }
+void tick() {
+    if (current == Page::Animation) animation::tick();
+    if (current == Page::KeyDebug) keydebug::tick();
+}
 void input(Input event, bool repeated) {
     // Animation directions toggle options; do not toggle repeatedly while held.
     if (repeated && current == Page::Animation) return;
@@ -39,6 +44,7 @@ void input(Input event, bool repeated) {
         case Page::Animation: animation::input(event); break;
         case Page::Cast: cast::input(event); break;
         case Page::Settings: settings::input(event); break;
+        case Page::KeyDebug: keydebug::input(event, repeated); break;
     }
 }
 }

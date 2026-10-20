@@ -34,7 +34,7 @@ void setup() {
     ui::begin();
     joystick::begin();
     ready = true;
-    Serial.println("AR Glass UI ready: 0 home / 1 album / 2 animation / 3 cast / 4 settings");
+    Serial.println("AR Glass UI ready: 0 home / 1 album / 2 animation / 3 cast / 4 settings / 5 key test");
     Serial.println("Joystick: directions move, MID click confirms, hold MID 650ms to go back.");
     Serial.println("Serial preview: WASD move, E confirm, B back.");
 }
