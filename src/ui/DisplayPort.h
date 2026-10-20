@@ -3,4 +3,5 @@
 namespace ui {
 bool displayBegin(St7789& screen);
 void displayTick();
+void setVideoMode(bool enabled);
 }

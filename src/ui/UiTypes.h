@@ -2,7 +2,7 @@
 #include <lvgl.h>
 
 namespace ui {
-enum class Page { Home, Album, Animation, Cast, Settings, KeyDebug };
+enum class Page { Home, Album, Animation, Cast, Settings, KeyDebug, CastSettings, Wifi };
 enum class Input { Up, Down, Left, Right, Confirm, Back };
 struct Preferences {
     unsigned brightness = 75;

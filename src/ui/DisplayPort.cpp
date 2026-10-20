@@ -8,7 +8,9 @@ St7789* display = nullptr;
 lv_disp_draw_buf_t drawBuffer;
 lv_disp_drv_t driver;
 uint32_t lastTick = 0;
+bool videoMode = false;
 void flush(lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* colors) {
+    if (videoMode) { lv_disp_flush_ready(drv); return; }
     // Translate the narrower logical display without resampling any pixels.
     const esp_err_t err = display->drawRect(ui::viewport::Left + area->x1,
         ui::viewport::Top + area->y1, area->x2 - area->x1 + 1, area->y2 - area->y1 + 1,
@@ -18,6 +20,11 @@ void flush(lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* colors) {
 }
 }
 namespace ui {
+void setVideoMode(bool enabled) {
+    if (videoMode == enabled) return;
+    videoMode = enabled;
+    if (!enabled && lv_scr_act()) lv_obj_invalidate(lv_scr_act());
+}
 bool displayBegin(St7789& screen) {
     static_assert(sizeof(lv_color_t) == 2, "Driver requires native RGB565");
     lv_init();

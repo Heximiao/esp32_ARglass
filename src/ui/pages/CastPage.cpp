@@ -1,38 +1,68 @@
 #include "CastPage.h"
 #include "../Widgets.h"
+#include "../../cast/CastService.h"
+#include <Arduino.h>
 
 namespace ui { namespace cast {
 namespace {
-lv_obj_t* cards[2];
-lv_obj_t* message;
-unsigned selected = 0;
-void refresh() { focus(cards[0], selected == 0); focus(cards[1], selected == 1); }
+lv_obj_t* root;lv_obj_t* list;lv_obj_t* rows[5];lv_obj_t* values[5];lv_obj_t* info[6];
+unsigned selected=0;bool waiting=false,startFailed=false;uint32_t updatedAt=0;
+casting::NetworkMode mode=casting::NetworkMode::Station;
+void refresh(lv_anim_enable_t animate=LV_ANIM_ON) {
+    lv_label_set_text(values[0],mode==casting::NetworkMode::AccessPoint?"HOTSPOT":"Wi-Fi");
+    const auto o=casting::options();
+    if(o.fps)lv_label_set_text_fmt(values[1],"%u FPS",o.fps);else lv_label_set_text(values[1],"AUTO");
+    for(unsigned i=0;i<5;++i){focus(rows[i],selected==i);lv_obj_align(values[i],LV_ALIGN_RIGHT_MID,-12,0);}
+    lv_obj_update_layout(list);lv_obj_scroll_to_view(rows[selected],animate);
 }
-lv_obj_t* create() {
-    auto* root = pageRoot();
-    header(root, "投屏", "COMING SOON");
-    const char* names[] = {"连接 Wi-Fi", "设备热点"};
-    const char* hints[] = {"Wi-Fi CLIENT", "DIRECT AP"};
-    constexpr unsigned cardWidth = (viewport::ContentWidth - viewport::Gap) / 2;
-    for (unsigned i = 0; i < 2; ++i) {
-        cards[i] = panel(root, 12 + i * (cardWidth + viewport::Gap), 38, cardWidth, 78);
-        label(cards[i], i ? LV_SYMBOL_UPLOAD : LV_SYMBOL_WIFI, 12, 12,
-              i ? 0xBEAAFF : Accent, &lv_font_montserrat_20);
-        label(cards[i], names[i], 12, 35);
-        label(cards[i], hints[i], 12, 61, Muted, &lv_font_montserrat_12);
+void render() {
+    lv_obj_clean(root);
+    header(root,"投屏",waiting?"BROWSER CAST":startFailed?casting::status():"VIDEO ONLY");
+    if(waiting){
+        for(unsigned i=0;i<6;++i)info[i]=label(root,"",12,36+i*17,White,&lv_font_montserrat_12);
+        footer(root,"MID stop  HOLD menu");updatedAt=0;
+    }else{
+        list=scrollArea(root,12,35,viewport::ContentWidth,110,LV_DIR_VER);
+        const char* names[]={"连接方式","目标帧率","投屏设置","连接 Wi-Fi","开始投屏"};
+        for(unsigned i=0;i<5;++i){rows[i]=panel(list,0,i*36,viewport::ContentWidth,32);
+            label(rows[i],names[i],12,4);values[i]=label(rows[i],i>=2?"OPEN >":"",0,0,Accent,&lv_font_montserrat_12);}
+        refresh(LV_ANIM_OFF);footer(root,"U/D select  MID open  HOLD back");
     }
-    message = label(root, "功能开发中", 0, 126, Muted);
-    lv_obj_align(message, LV_ALIGN_TOP_MID, 0, 126);
-    selected = 0; refresh();
-    footer(root, "L/R select  MID details  HOLD back");
-    return root;
 }
+}
+lv_obj_t* create(){root=pageRoot();waiting=false;startFailed=false;render();return root;}
 void input(Input event) {
-    if (event == Input::Back) { navigate(Page::Home); return; }
-    if (event == Input::Left || event == Input::Right) { selected ^= 1; refresh(); }
-    if (event == Input::Confirm) {
-        lv_label_set_text(message, selected ? "热点功能待开放" : "网络功能待开放");
-        lv_obj_align(message, LV_ALIGN_TOP_MID, 0, 126);
+    if(waiting){
+        if(event==Input::Back||event==Input::Confirm){casting::setAccepting(false);waiting=false;render();}
+        return;
     }
+    if(event==Input::Back){navigate(Page::Home);return;}
+    if(event==Input::Up)selected=(selected+4)%5;
+    if(event==Input::Down)selected=(selected+1)%5;
+    if(event==Input::Left||event==Input::Right||event==Input::Confirm){
+        if(selected==0)mode=mode==casting::NetworkMode::AccessPoint?casting::NetworkMode::Station:casting::NetworkMode::AccessPoint;
+        if(selected==1){const uint8_t rates[]={5,10,15,20,25,30,40,50,0};auto o=casting::options();unsigned index=0;
+            for(unsigned i=0;i<9;++i)if(rates[i]==o.fps)index=i;
+            o.fps=rates[(index+(event==Input::Left?8:1))%9];casting::setOptions(o);}
+        if(selected==2 && event!=Input::Left){navigate(Page::CastSettings);return;}
+        if(selected==3 && event==Input::Confirm){mode=casting::NetworkMode::Station;navigate(Page::Wifi);return;}
+        if(selected==4 && event==Input::Confirm){
+            if(mode==casting::NetworkMode::Station && casting::savedWifiName().isEmpty() && !casting::wifiConnected()){navigate(Page::Wifi);return;}
+            waiting=casting::start(mode);startFailed=!waiting;render();
+            return;
+        }
+    }
+    refresh();
+}
+void tick(){
+    if(!waiting||casting::streaming()||uint32_t(millis()-updatedAt)<300)return;
+    updatedAt=millis();
+    lv_label_set_text(info[0],casting::address().c_str());
+    const String ssid=casting::hotspotName();
+    lv_label_set_text_fmt(info[1],"SSID: %s",ssid.isEmpty()?"same 2.4 GHz WiFi":ssid.c_str());
+    lv_label_set_text_fmt(info[2],"PASS: %s",ssid.isEmpty()?"saved network":casting::hotspotPassword().c_str());
+    lv_label_set_text_fmt(info[3],"PAIR CODE: %s",casting::pin());
+    lv_label_set_text(info[4],casting::status());
+    lv_label_set_text(info[5],ssid.isEmpty()?"PC: same Wi-Fi / trust HTTPS":"First: http://192.168.4.1");
 }
 } }

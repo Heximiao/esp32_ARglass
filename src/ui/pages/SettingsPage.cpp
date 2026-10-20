@@ -3,8 +3,8 @@
 
 namespace ui { namespace settings {
 namespace {
-lv_obj_t* rows[5];
-lv_obj_t* values[5];
+lv_obj_t* rows[6];
+lv_obj_t* values[6];
 lv_obj_t* list;
 unsigned selected = 0;
 void refresh(lv_anim_enable_t animation = LV_ANIM_ON) {
@@ -12,7 +12,7 @@ void refresh(lv_anim_enable_t animation = LV_ANIM_ON) {
     lv_label_set_text_fmt(values[0], "%u%%", preferences().brightness);
     lv_label_set_text(values[1], speeds[preferences().speed]);
     lv_label_set_text(values[2], preferences().animationInfo ? "ON" : "OFF");
-    for (unsigned i = 0; i < 5; ++i) {
+    for (unsigned i = 0; i < 6; ++i) {
         focus(rows[i], i == selected);
         lv_obj_align(values[i], LV_ALIGN_RIGHT_MID, -12, 0);
     }
@@ -24,9 +24,9 @@ lv_obj_t* create() {
     auto* root = pageRoot();
     header(root, "设置", "UI / V1.0");
     list = scrollArea(root, 12, 35, viewport::ContentWidth, 110, LV_DIR_VER);
-    const char* titles[] = {"屏幕亮度", "动画速度", "动画信息", "按键调试", "设备信息"};
-    const char* details[] = {"", "", "", "OPEN >", "S3 / 320x172"};
-    for (unsigned i = 0; i < 5; ++i) {
+    const char* titles[] = {"屏幕亮度", "动画速度", "动画信息", "按键调试", "投屏设置", "设备信息"};
+    const char* details[] = {"", "", "", "OPEN >", "OPEN >", "S3 / 320x172"};
+    for (unsigned i = 0; i < 6; ++i) {
         rows[i] = panel(list, 0, i * 36, viewport::ContentWidth, 32);
         lv_obj_set_style_radius(rows[i], 8, 0);
         label(rows[i], titles[i], 12, 4);
@@ -38,12 +38,13 @@ lv_obj_t* create() {
 }
 void input(Input event) {
     if (event == Input::Back) { navigate(Page::Home); return; }
-    if (event == Input::Up) selected = (selected + 4) % 5;
-    if (event == Input::Down) selected = (selected + 1) % 5;
+    if (event == Input::Up) selected = (selected + 5) % 6;
+    if (event == Input::Down) selected = (selected + 1) % 6;
     if (selected == 3 && (event == Input::Confirm || event == Input::Right)) {
         navigate(Page::KeyDebug);
         return;
     }
+    if(selected==4 && (event==Input::Confirm||event==Input::Right)){navigate(Page::CastSettings);return;}
     if (event == Input::Confirm || event == Input::Right || event == Input::Left) {
         if (selected == 0) {
             const int value = int(preferences().brightness) + (event == Input::Left ? -10 : 10);

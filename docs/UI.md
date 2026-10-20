@@ -23,9 +23,9 @@ SPI 引脚、偏移、颜色顺序保持现有配置。开机进入首页。
   只显示真实文件，当前只有 `screensaver.rgb565` 时就是一张图片。
 - 动画：选择相册图片，碰壁反弹，暂停 / 继续、三档速度、隐藏信息全屏展示。
   目标更新间隔 33 ms，实际帧率需要屏幕实测。
-- 投屏：连接 Wi-Fi / 设备热点两个入口和开发中提示。
-  本版不会启动 Wi-Fi、热点或画面接收。
-- 设置：上下滚动列表，包含屏幕亮度、动画速度、动画信息、按键调试和设备信息。
+- 投屏：选择 Wi-Fi / 设备热点、目标帧率，打开投屏设置或开始浏览器投屏。
+  支持连续 JPEG 和原始 RGB565，首次 HTTPS 配置及操作见 [CASTING.md](CASTING.md)。
+- 设置：上下滚动列表，包含屏幕亮度、动画速度、动画信息、按键调试、投屏设置和设备信息。
   亮度使用 GPIO6 的 LEDC PWM，默认 75%，调整范围 15%～100%。
   LEDC 通道 0 用于背光，后续其他外设应避免占用同一通道。
   设置只保存在内存，重启恢复默认。
@@ -89,9 +89,10 @@ GPIO 启动日志和调试页使用同一份配置，不需要修改页面代码
 | `0` | 首页 |
 | `1` | 相册 |
 | `2` | 图片动画 |
-| `3` | 投屏占位页 |
+| `3` | 浏览器投屏菜单 |
 | `4` | 设置 |
 | `5` | 按键调试 |
+| `6` | 投屏设置 |
 | `w` / `s` / `a` / `d` | 上 / 下 / 左 / 右 |
 | `e` | 确认 |
 | `b` | 返回 |
@@ -122,9 +123,12 @@ src/ui/SerialPreview.*         USB 串口预览输入
 src/ui/pages/HomePage.*        首页
 src/ui/pages/AlbumPage.*       相册
 src/ui/pages/AnimationPage.*   图片反弹动画
-src/ui/pages/CastPage.*        投屏占位
+src/ui/pages/CastPage.*        连接方式、目标帧率、开始投屏及地址提示
 src/ui/pages/SettingsPage.*    设置
 src/ui/pages/KeyDebugPage.*    红点移动、GPIO 识别及五个按键的实时状态
+src/ui/pages/CastSettingsPage.* 投屏格式、帧率、画质及显示选项
+src/cast/                     HTTPS/WSS、网络管理、画面接收与解码
+web/cast/                     编译进固件的浏览器发送页面
 ```
 
 ## 图片与上传
@@ -193,9 +197,8 @@ python tools/generate_ui_font.py "NotoSansSC-Regular.otf" --bpp 2
 源字体：[Noto CJK 官方仓库](https://github.com/notofonts/noto-cjk/tree/main/Sans/SubsetOTF/SC)。
 生成器只依赖 Pillow，不访问网络，会校验菜单汉字是否全部覆盖。
 
-本版完整字库固件编译占用约 **2.96 MiB / 3.19 MiB**，
-当前 OTA 双固件槽和 LittleFS 分区不变。后续加入网络功能时应重新检查体积。
-4 位灰度完整字体估计约 4.27 MiB，仅字体就超过当前单个固件槽，
-因此本版选择 2 位灰度。
+加入投屏后固件约 **3.57 MiB / 6.375 MiB**，原双应用槽已合并，
+NVS 与图片分区的位置、大小保持不变。分区和升级说明见 [CASTING.md](CASTING.md)。
+2 位灰度字体继续保留，约 2.40 MiB；4 位灰度完整字体估计约 4.27 MiB。
 
-网络配网、软键盘和投屏接收留到后续版本。
+Wi-Fi 配网可直接在“投屏 → 连接 Wi-Fi”中扫描选网，使用五维摇杆操控屏幕密码键盘；连接成功后保存，网页表单仍可选用。详见 docs/CASTING.md。

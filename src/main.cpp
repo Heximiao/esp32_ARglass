@@ -5,6 +5,7 @@
 #include "ui/UiApp.h"
 #include "ui/SerialPreview.h"
 #include "input/Joystick.h"
+#include "cast/CastService.h"
 
 namespace {
 St7789 screen;
@@ -31,6 +32,7 @@ void setup() {
         screen.fill(0xF800);
         return;
     }
+    casting::begin(screen);
     ui::begin();
     joystick::begin();
     ready = true;
@@ -43,6 +45,7 @@ void loop() {
     if (ready) {
         joystick::tick();
         ui::serialPreviewTick();
+        casting::tick();
         static unsigned appliedBrightness = 75;
         const unsigned brightness = ui::preferences().brightness;
         if (brightness != appliedBrightness) {
