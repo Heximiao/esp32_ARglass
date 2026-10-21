@@ -10,6 +10,7 @@ namespace {
 enum class State { List, Password, Connecting, Result };
 State state=State::List;
 lv_obj_t* root;lv_obj_t* list;lv_obj_t* rows[26];lv_obj_t* feedback=nullptr;
+lv_obj_t* ipLabel=nullptr;
 unsigned selected=0,total=0;bool wasScanning=false,success=false,openNetwork=false,unsupported=false;
 String ssid;uint32_t updatedAt=0;
 void refresh(){
@@ -44,7 +45,18 @@ void message(const char* title,const char* body,const char* hint){
     feedback=label(root,body,12,65);lv_obj_set_width(feedback,viewport::ContentWidth);
     footer(root,hint);
 }
-void result(bool ok,const char* text){state=State::Result;success=ok;message(ok?"连接成功":"连接失败",text,ok?"MID cast menu  HOLD networks":"MID retry  HOLD networks");}
+void updateIp(){
+    const String ip=casting::localIp();
+    lv_label_set_text_fmt(ipLabel,"LAN IP: %s",ip.isEmpty()?"not connected":ip.c_str());
+}
+void result(bool ok,const char* text){
+    state=State::Result;success=ok;
+    message(ok?"连接成功":"连接失败",text,ok?"MID cast menu  HOLD networks":"MID retry  HOLD networks");
+    if(ok){
+        ipLabel=label(root,"",12,109,Accent,&lv_font_montserrat_14);
+        lv_obj_set_width(ipLabel,viewport::ContentWidth);updateIp();
+    }
+}
 void connect(const String& password){
     if(!casting::queueWifi(ssid.c_str(),password.c_str())){result(false,"网络名称或密码无效");return;}
     state=State::Connecting;success=false;updatedAt=millis();message("正在连接","正在获取网络地址…","HOLD cancel");
@@ -55,11 +67,18 @@ void passwordPage(){
 }
 }
 lv_obj_t* create(){
+    casting::setWifiSetupActive(true);
     root=pageRoot();selected=0;success=false;
     casting::networks::scan();wasScanning=casting::networks::scanning();renderList();return root;
 }
-void leave(){keyboard::clear();if(state==State::Connecting)casting::cancelWifi();}
+void leave(){
+    keyboard::clear();if(state==State::Connecting)casting::cancelWifi();
+    casting::setWifiSetupActive(false);
+}
 void tick(){
+    if(state==State::Result && success && uint32_t(millis()-updatedAt)>=500){
+        updatedAt=millis();updateIp();
+    }
     if(state==State::List && wasScanning!=casting::networks::scanning()){
         wasScanning=casting::networks::scanning();renderList();
     }

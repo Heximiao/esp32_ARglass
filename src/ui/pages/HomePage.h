@@ -3,4 +3,5 @@
 namespace ui { namespace home {
 lv_obj_t* create();
 void input(Input event);
+void tick();
 } }

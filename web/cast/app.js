@@ -2,7 +2,9 @@
 const $ = id => document.getElementById(id);
 const canvas = $('canvas'), context = canvas.getContext('2d', {alpha: false, willReadFrequently: true});
 const video = $('video');
+const assistant=window.AR_ASSISTANT||null;
 let socket = null, connectionPromise = null, media = null, sending = false, running = false;
+let quitting = false;
 let generation = 0, sequence = 0, lastCapture = 0, lastAckAt = 0;
 const pending = new Set();
 let config = {width: 256, height: 172, format: 1, fps: 30, quality: 70, fill: false, showFps: true, accepting: false};
@@ -27,16 +29,18 @@ function sendCommand(command) {
 function connect() {
   if (socket?.readyState === WebSocket.OPEN) return Promise.resolve();
   if (connectionPromise) return connectionPromise;
-  const pin=$('pin').value.trim();
-  if (!/^\d{6}$/.test(pin)) return Promise.reject(new Error('请输入眼镜上显示的六位配对码。'));
+  const ip=assistant?$('deviceIp').value.trim():'';
+  if(assistant&&!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(ip))return Promise.reject(new Error('请输入眼镜显示的局域网 IPv4 地址。'));
+  if(assistant)localStorage.setItem('arGlassIp',ip);
   connectionPromise=new Promise((resolve,reject)=>{
-    const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws?pin=${encodeURIComponent(pin)}`);
+    const query=assistant?`?ip=${encodeURIComponent(ip)}&session=${encodeURIComponent(assistant.session)}`:'';
+    const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws${query}`);
     socket=ws;
-    const timeout=setTimeout(()=>{ws.close();reject(new Error('连接超时，请检查证书、网络和配对码。'));},10000);
+    const timeout=setTimeout(()=>{ws.close();reject(new Error('连接超时，请确认眼镜 IP、网络和投屏等待状态。'));},10000);
     ws.onopen=()=>{ws.send(JSON.stringify({type:'state'}));};
-    ws.onmessage=event=>{try{const state=JSON.parse(event.data);applyState(state);if(state.type==='state'||state.type==='ack'){clearTimeout(timeout);$('connection').textContent='已连接';resolve();}}catch(error){message(`设备响应异常：${error.message}`);}};
-    ws.onerror=()=>{clearTimeout(timeout);reject(new Error('无法连接：请检查配对码、HTTPS 信任和是否已有其他发送端。'));};
-    ws.onclose=()=>{clearTimeout(timeout);if(socket===ws){socket=null;stop(false);$('connection').textContent='已断开';message('连接已断开。请检查眼镜网络状态后重新连接。');} reject(new Error('连接已关闭。'));};
+    ws.onmessage=event=>{try{const state=JSON.parse(event.data);applyState(state);if(state.type==='state'||state.type==='ack'){clearTimeout(timeout);$('connection').textContent='已连接';if(assistant)$('deviceIp').disabled=true;resolve();}}catch(error){message(`设备响应异常：${error.message}`);}};
+    ws.onerror=()=>{clearTimeout(timeout);reject(new Error('无法连接：请确认眼镜已开始投屏、IP 正确且没有其他发送端；助手需要新版固件。'));};
+    ws.onclose=()=>{clearTimeout(timeout);if(socket===ws){socket=null;if(assistant)$('deviceIp').disabled=false;stop(false);$('connection').textContent='已断开';if(!quitting)message('连接已断开。请检查眼镜网络状态后重新连接。');} reject(new Error('连接已关闭。'));};
   }).finally(()=>{connectionPromise=null;});
   return connectionPromise;
 }
@@ -86,10 +90,9 @@ async function pump(now) {
   } catch(error){stop();message(error.message);}
   finally{if(version===generation)sending=false;}
 }
-$('connect').onclick=()=>connect().catch(error=>message(error.message));
+$('connect').onclick=()=>{message('正在连接眼镜…');connect().then(()=>message('已连接，可以选择画面投屏。')).catch(error=>message(error.message));};
 $('start').onclick=async()=>{
   if(!window.isSecureContext || !navigator.mediaDevices?.getDisplayMedia){$('secureWarning').classList.remove('hidden');return;}
-  if(!/^\d{6}$/.test($('pin').value.trim())){message('请输入眼镜上显示的六位配对码。');return;}
   $('start').disabled=true;
   try {
     // Capture must be requested inside the click activation, before network awaits.
@@ -110,4 +113,29 @@ $('saveWifi').onclick=()=>{if(running)return;const password=$('password').value;
 setInterval(()=>{if(socket?.readyState===WebSocket.OPEN&&!running)sendCommand({type:'state'});},1000);
 window.addEventListener('pagehide',()=>{stop(false);socket?.close();});
 if(!window.isSecureContext || !navigator.mediaDevices?.getDisplayMedia)$('secureWarning').classList.remove('hidden');
-fetch('/api/state').then(response=>response.json()).then(applyState).catch(()=>message('设备暂时无响应，请稍后刷新。'));
+if(assistant){
+  $('assistantControls').classList.remove('hidden');
+  $('wifiSetup').classList.add('hidden');
+  $('deviceIp').value=localStorage.getItem('arGlassIp')||'';
+  document.title='AR Glass · 投屏助手';
+  $('status').textContent='眼镜选择“开始投屏”，输入 LAN IP 或点击查找眼镜。无需证书和配对码。';
+  $('exitAssistant').onclick=async()=>{
+    quitting=true;stop();socket?.close();
+    try{const response=await fetch(`/api/shutdown?session=${encodeURIComponent(assistant.session)}`,{method:'POST'});if(!response.ok)throw new Error('退出失败');message('助手已退出，可以关闭本页。');for(const button of document.querySelectorAll('button'))button.disabled=true;}
+    catch(error){quitting=false;message(`${error.message}，请关闭助手窗口。`);}
+  };
+  $('devices').onchange=()=>{if(!socket)$('deviceIp').value=$('devices').value;};
+  $('discover').onclick=async()=>{
+    $('discover').disabled=true;$('deviceHint').textContent='正在本地网络查找眼镜…';
+    try{
+      const response=await fetch(`/api/discover?session=${encodeURIComponent(assistant.session)}`);
+      if(!response.ok)throw new Error('查找失败');
+      const data=await response.json();$('devices').replaceChildren();
+      for(const ip of data.addresses){const option=document.createElement('option');option.value=ip;option.textContent=ip;$('devices').append(option);}
+      $('devices').classList.toggle('hidden',!data.addresses.length);
+      if(data.addresses.length && !socket)$('deviceIp').value=data.addresses[0];
+      $('deviceHint').textContent=data.addresses.length?'已找到设备，请确认 IP 后连接。':'未发现设备，请手动输入眼镜的 LAN IP。';
+    }catch(error){$('deviceHint').textContent=`${error.message}，可手动输入 IP。`;}
+    finally{$('discover').disabled=false;}
+  };
+}else fetch('/api/state').then(response=>response.json()).then(applyState).catch(()=>message('设备暂时无响应，请稍后刷新。'));

@@ -1,5 +1,6 @@
 #include "HomePage.h"
 #include "../Widgets.h"
+#include "../WifiIndicator.h"
 
 namespace ui { namespace home {
 namespace {
@@ -23,9 +24,10 @@ lv_obj_t* create() {
     label(root, "AR / GLASS", 12, 11, White, &lv_font_montserrat_14);
     counter = label(root, "", 0, 12, Accent, &lv_font_montserrat_12);
     lv_obj_align(counter, LV_ALIGN_TOP_RIGHT, -12, 12);
+    wifiindicator::create(root);
     strip = scrollArea(root, 12, 43, viewport::ContentWidth, 100, LV_DIR_HOR);
     const char* names[] = {"相册", "动画", "投屏", "设置"};
-    const char* notes[] = {"PHOTOS", "BOUNCE", "SOON", "SYSTEM"};
+    const char* notes[] = {"PHOTOS", "BOUNCE", "CAST", "SYSTEM"};
     const char* icons[] = {LV_SYMBOL_IMAGE, LV_SYMBOL_PLAY, LV_SYMBOL_WIFI, LV_SYMBOL_SETTINGS};
     const uint32_t colors[] = {0x53DDDF, 0xBEAAFF, 0xFFC68B, 0x9DE2AD};
     for (unsigned i = 0; i < 4; ++i) {
@@ -41,6 +43,7 @@ lv_obj_t* create() {
     footer(root, "L/R scroll  MID open  HOLD back");
     return root;
 }
+void tick(){wifiindicator::tick();}
 void input(Input event) {
     if (event == Input::Left || event == Input::Up) selected = (selected + 3) % 4;
     if (event == Input::Right || event == Input::Down) selected = (selected + 1) % 4;

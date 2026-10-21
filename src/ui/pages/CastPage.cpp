@@ -19,7 +19,11 @@ void render() {
     lv_obj_clean(root);
     header(root,"投屏",waiting?"BROWSER CAST":startFailed?casting::status():"VIDEO ONLY");
     if(waiting){
-        for(unsigned i=0;i<6;++i)info[i]=label(root,"",12,36+i*17,White,&lv_font_montserrat_12);
+        for(unsigned i=0;i<6;++i){
+            info[i]=label(root,"",12,36+i*17,White,&lv_font_montserrat_12);
+            lv_obj_set_width(info[i],viewport::ContentWidth);
+            lv_label_set_long_mode(info[i],LV_LABEL_LONG_DOT);
+        }
         footer(root,"MID stop  HOLD menu");updatedAt=0;
     }else{
         list=scrollArea(root,12,35,viewport::ContentWidth,110,LV_DIR_VER);
@@ -59,9 +63,15 @@ void tick(){
     updatedAt=millis();
     lv_label_set_text(info[0],casting::address().c_str());
     const String ssid=casting::hotspotName();
-    lv_label_set_text_fmt(info[1],"SSID: %s",ssid.isEmpty()?"same 2.4 GHz WiFi":ssid.c_str());
-    lv_label_set_text_fmt(info[2],"PASS: %s",ssid.isEmpty()?"saved network":casting::hotspotPassword().c_str());
-    lv_label_set_text_fmt(info[3],"PAIR CODE: %s",casting::pin());
+    if(mode==casting::NetworkMode::Station){
+        const String ip=casting::localIp();
+        lv_label_set_text_fmt(info[1],"LAN IP: %s",ip.isEmpty()?"not connected":ip.c_str());
+        lv_label_set_text_fmt(info[2],"HTTP: %s",ip.isEmpty()?"waiting for IP":(String("http://")+ip).c_str());
+    }else{
+        lv_label_set_text_fmt(info[1],"SSID: %s",ssid.c_str());
+        lv_label_set_text_fmt(info[2],"PASS: %s",casting::hotspotPassword().c_str());
+    }
+    lv_label_set_text(info[3],"ASSISTANT: connect by IP");
     lv_label_set_text(info[4],casting::status());
     lv_label_set_text(info[5],ssid.isEmpty()?"PC: same Wi-Fi / trust HTTPS":"First: http://192.168.4.1");
 }

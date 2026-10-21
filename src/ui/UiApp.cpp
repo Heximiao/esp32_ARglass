@@ -39,6 +39,7 @@ void navigate(Page page) {
 }
 void begin() { photos().begin(); navigate(Page::Home); }
 void tick() {
+    if (current == Page::Home) home::tick();
     if (current == Page::Animation) animation::tick();
     if (current == Page::KeyDebug) keydebug::tick();
     if (current == Page::Cast) cast::tick();

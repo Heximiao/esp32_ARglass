@@ -13,7 +13,6 @@ bool running();
 Options options();
 void setOptions(const Options& value);
 String stateJson(const char* type = "state", int ack = -1);
-const char* pin();
 const char* status();
 String address();
 String hotspotName();
@@ -22,9 +21,13 @@ String hotspotPassword();
 bool wifiConnected();
 bool wifiConnecting();
 String wifiName();
+// Empty until the station has a usable DHCP address; not the hotspot address.
+String localIp();
 String savedWifiName();
 void cancelWifi();
 bool reconnectWifi();
+// Pause boot/retry attempts while the user scans and edits credentials.
+void setWifiSetupActive(bool active);
 bool queueWifi(const char* ssid, const char* password);
 // HTTP task exclusively owns a claimed input slot until submit/cancel.
 uint8_t* claimFrame(int& slot);

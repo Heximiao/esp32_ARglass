@@ -2,6 +2,8 @@
 // Requires Playwright, Chrome, and locally generated src/cast/private/TlsMaterial.h.
 const assert=require('node:assert/strict');
 const fs=require('node:fs');const path=require('node:path');const https=require('node:https');const crypto=require('node:crypto');
+const assistantMode=process.env.CAST_ASSISTANT==='1';
+const {spawn}=require('node:child_process');
 const {chromium}=require(process.env.CAST_PLAYWRIGHT||'playwright');
 const root=path.resolve(__dirname,'..');
 const tls=fs.readFileSync(path.join(root,'src/cast/private/TlsMaterial.h'),'utf8');
@@ -14,12 +16,13 @@ function send(socket,value){const payload=Buffer.from(JSON.stringify(value));let
   if(payload.length<126)header=Buffer.from([0x81,payload.length]);
   else{header=Buffer.alloc(4);header[0]=0x81;header[1]=126;header.writeUInt16BE(payload.length,2);}
   if(!socket.destroyed)socket.write(Buffer.concat([header,payload]));}
-const server=https.createServer({key:pem('CastPrivateKey'),cert:pem('CastCertificate')},(req,res)=>{
+const transport=assistantMode?require('node:http'):https;
+const server=transport.createServer(assistantMode?{}:{key:pem('CastPrivateKey'),cert:pem('CastCertificate')},(req,res)=>{
   res.setHeader('Connection','close');res.setHeader('Content-Type',req.url==='/api/state'?'application/json':'text/html; charset=utf-8');
   res.end(req.url==='/api/state'?JSON.stringify(state):html);
 });
 server.on('upgrade',(req,socket)=>{
-  if(new URL(req.url,'https://localhost').searchParams.get('pin')!=='123456'){socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');return;}
+  assert.equal(req.url,'/ws');
   const accept=crypto.createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
   socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
   connections.push(socket);let buffered=Buffer.alloc(0),fragments=[];
@@ -51,8 +54,39 @@ server.on('upgrade',(req,socket)=>{
     }}catch(error){failures.push(error.stack);socket.destroy();}
   });
 });
+let helper=null,helperUrl=null;
+async function closeHelper(){
+  if(!helper)return;
+  const processToClose=helper;helper=null;
+  try{
+    const html=await (await fetch(helperUrl,{signal:AbortSignal.timeout(3000)})).text();
+    const config=JSON.parse(html.match(/window.AR_ASSISTANT=(\{[^;]+\});/)[1]);
+    const target=new URL(`/api/shutdown?session=${encodeURIComponent(config.session)}`,helperUrl);
+    const response=await fetch(target,{method:'POST',headers:{Origin:target.origin},signal:AbortSignal.timeout(3000)});
+    assert(response.ok);
+    await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Assistant did not exit')),5000);processToClose.once('exit',()=>{clearTimeout(timer);resolve();});if(processToClose.exitCode!==null){clearTimeout(timer);resolve();}});
+  }catch(error){
+    if(process.platform==='win32')require('node:child_process').spawnSync('taskkill',['/PID',String(processToClose.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});
+    else processToClose.kill();
+    throw error;
+  }
+}
 (async()=>{
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  let pageUrl=`https://127.0.0.1:${server.address().port}/`;
+  if(assistantMode){
+    const directory=path.resolve(root,'../arglass_assistant');
+    const executable=process.env.CAST_ASSISTANT_EXE||process.env.CAST_PYTHON||'python';
+    const args=process.env.CAST_ASSISTANT_EXE?[]:[path.join(directory,'assistant.py')];
+    helper=spawn(executable,[...args,'--no-browser','--device-port',String(server.address().port)],{cwd:directory,env:{...process.env,PYTHONUTF8:'1'},windowsHide:true,stdio:['ignore','pipe','inherit']});
+    pageUrl=await new Promise((resolve,reject)=>{
+      let output='';const timer=setTimeout(()=>reject(new Error('Assistant did not start')),30000);
+      helper.stdout.on('data',chunk=>{output+=chunk;const match=output.match(/http:\/\/127\.0\.0\.1:\d+\//);if(match){clearTimeout(timer);resolve(match[0]);}});
+      helper.once('error',error=>{clearTimeout(timer);reject(error);});
+      helper.once('exit',code=>{clearTimeout(timer);reject(new Error(`Assistant exited ${code}`));});
+    });
+    helperUrl=pageUrl;
+  }
   const browser=await chromium.launch({headless:true,executablePath:process.env.CAST_CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
   try{
     // Certificate exceptions apply only to this isolated test context, never the OS.
@@ -69,8 +103,9 @@ server.on('upgrade',(req,socket)=>{
         track.stop=()=>{clearInterval(interval);stop();};window.__captureTracks.push(track);return stream;
       };
     });
-    await page.goto(`https://127.0.0.1:${server.address().port}/`);
-    await page.locator('#pin').fill('123456');
+    await page.goto(pageUrl);
+    if(assistantMode)await page.locator('#deviceIp').fill('127.0.0.1');
+    assert.equal(await page.locator('#pin').count(),0);
     // Direct Start (without a prior connect) tests transient activation ordering and state handshake.
     await page.locator('#start').click();
     await page.waitForFunction(()=>document.getElementById('stop').disabled===false);
@@ -96,6 +131,6 @@ server.on('upgrade',(req,socket)=>{
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     await page.screenshot({path:path.join(out,'narrow.png'),fullPage:true});
     assert.deepEqual(pageErrors,[]);assert.deepEqual(failures,[]);
-    console.log(`PASS: direct-start handshake, JPEG ${jpeg}, RGB565 ${rgb}, byte order, 5 FPS pacing, two-frame backpressure, stop/restart, device exit, audio=false, responsive layout.`);
-  }finally{await browser.close();for(const socket of connections)socket.destroy();await new Promise(resolve=>server.close(resolve));}
-})().catch(error=>{console.error(error.stack);if(failures.length)console.error(failures.join('\n'));process.exitCode=1;for(const socket of connections)socket.destroy();server.close();});
+    console.log(`PASS ${assistantMode?'assistant':'device page'}: direct-start handshake, JPEG ${jpeg}, RGB565 ${rgb}, byte order, 5 FPS pacing, two-frame backpressure, stop/restart, device exit, audio=false, responsive layout.`);
+  }finally{await browser.close();await closeHelper();for(const socket of connections)socket.destroy();await new Promise(resolve=>server.close(resolve));}
+})().catch(async error=>{try{await closeHelper();}catch(cleanupError){console.error(cleanupError.message);}console.error(error.stack);if(failures.length)console.error(failures.join('\n'));process.exitCode=1;for(const socket of connections)socket.destroy();server.close();});

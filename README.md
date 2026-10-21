@@ -62,3 +62,9 @@ pio run --target uploadfs
 
 固件编译和文件系统打包可在电脑完成。
 实际显示效果、亮度调节、动画帧率和长时间运行仍需要连接设备验证。
+
+## 电脑投屏助手
+
+旁边的 `../arglass_assistant` 提供 Windows 免安装投屏助手，EXE 位于 `dist/ARGlassAssistant.exe`。
+本版不再需要配对码；上传新版固件后，在眼镜进入开始投屏页，助手输入眼镜 LAN IP 即可连接。
+助手方式无需导入证书，不依赖 `.local` 域名；原 HTTPS 网页方式继续保留。

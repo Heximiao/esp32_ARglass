@@ -6,12 +6,15 @@
 #include <esp_http_server.h>
 #include <cJSON.h>
 #include <lwip/sockets.h>
+#include <freertos/semphr.h>
 #include <cstring>
 
 namespace casting {
 namespace {
 httpd_handle_t secureServer=nullptr, plainServer=nullptr;
+SemaphoreHandle_t wsMutex=nullptr;
 int ownerFd=-1;
+httpd_handle_t ownerServer=nullptr;
 int inboundSlot=-1;
 size_t inboundBytes=0;
 bool textInProgress=false;
@@ -50,23 +53,22 @@ esp_err_t sendText(httpd_req_t* req,const String& text) {
     packet.payload=reinterpret_cast<uint8_t*>(const_cast<char*>(text.c_str()));packet.len=text.length();
     return httpd_ws_send_frame(req,&packet);
 }
-esp_err_t ws(httpd_req_t* req) {
+esp_err_t wsLocked(httpd_req_t* req) {
     const int fd=httpd_req_to_sockfd(req);
     if(req->method==HTTP_GET) {
-        char query[64],code[12];
-        if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK ||
-           httpd_query_key_value(query,"pin",code,sizeof(code))!=ESP_OK || strcmp(code,pin())!=0) {
-            httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"Pairing code incorrect");return ESP_FAIL;
+        if(!accepting()) {
+            httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"Start casting on the glasses first");return ESP_FAIL;
         }
-        if(ownerFd>=0 && httpd_ws_get_fd_info(secureServer,ownerFd)==HTTPD_WS_CLIENT_WEBSOCKET && ownerFd!=fd) {
+        if(ownerServer && ownerFd>=0 && httpd_ws_get_fd_info(ownerServer,ownerFd)==HTTPD_WS_CLIENT_WEBSOCKET &&
+           (ownerFd!=fd || ownerServer!=req->handle)) {
             httpd_resp_set_status(req,"409 Conflict");httpd_resp_sendstr(req,"One sender at a time");return ESP_FAIL;
         }
         const int noDelay=1;
         setsockopt(fd,IPPROTO_TCP,TCP_NODELAY,&noDelay,sizeof(noDelay));
-        cancelInbound();ownerFd=fd;
+        cancelInbound();ownerFd=fd;ownerServer=req->handle;
         return ESP_OK;
     }
-    if(fd!=ownerFd) return ESP_FAIL;
+    if(fd!=ownerFd || req->handle!=ownerServer) return ESP_FAIL;
     httpd_ws_frame_t packet={};
     if(httpd_ws_recv_frame(req,&packet,0)!=ESP_OK) {cancelInbound();ownerFd=-1;requestStop();return ESP_FAIL;}
     if(packet.type==HTTPD_WS_TYPE_CLOSE) {cancelInbound();ownerFd=-1;requestStop();return ESP_FAIL;}
@@ -129,6 +131,13 @@ esp_err_t ws(httpd_req_t* req) {
     if(!error.isEmpty()) return sendText(req,String("{\"type\":\"error\",\"message\":\"")+error+"\"}");
     return sendText(req,stateJson());
 }
+esp_err_t ws(httpd_req_t* req) {
+    // HTTP and HTTPS run in separate tasks but share one sender and frame assembler.
+    if(!wsMutex || xSemaphoreTake(wsMutex,portMAX_DELAY)!=pdTRUE)return ESP_FAIL;
+    const esp_err_t result=wsLocked(req);
+    xSemaphoreGive(wsMutex);
+    return result;
+}
 bool route(httpd_handle_t server,const char* path,esp_err_t(*handler)(httpd_req_t*),bool websocket=false) {
     httpd_uri_t uri={};uri.uri=path;uri.method=HTTP_GET;uri.handler=handler;
     uri.is_websocket=websocket;uri.handle_ws_control_frames=websocket;
@@ -137,6 +146,8 @@ bool route(httpd_handle_t server,const char* path,esp_err_t(*handler)(httpd_req_
 }
 bool serverBegin() {
     if(secureServer && plainServer) return true;
+    if(!wsMutex)wsMutex=xSemaphoreCreateMutex();
+    if(!wsMutex)return false;
     httpd_ssl_config_t tls=HTTPD_SSL_CONFIG_DEFAULT();
     tls.httpd.stack_size=12288;tls.httpd.max_open_sockets=2;tls.httpd.max_uri_handlers=6;
     tls.httpd.recv_wait_timeout=3;tls.httpd.send_wait_timeout=3;
@@ -146,9 +157,10 @@ bool serverBegin() {
     const bool secureOkay=route(secureServer,"/",browserPage)&&route(secureServer,"/ws",ws,true)&&
         route(secureServer,"/api/state",stateGet)&&route(secureServer,"/root.crt",rootCertificate)&&route(secureServer,"/favicon.ico",favicon);
     httpd_config_t plain=HTTPD_DEFAULT_CONFIG();plain.server_port=80;plain.ctrl_port=32769;plain.max_open_sockets=2;
-    plain.stack_size=4096;plain.max_uri_handlers=3;plain.lru_purge_enable=true;
+    plain.stack_size=4096;plain.max_uri_handlers=5;plain.lru_purge_enable=true;
     if(!secureOkay || httpd_start(&plainServer,&plain)!=ESP_OK ||
-       !route(plainServer,"/",setupPage)||!route(plainServer,"/root.crt",rootCertificate)||!route(plainServer,"/favicon.ico",favicon)) {
+       !route(plainServer,"/",setupPage)||!route(plainServer,"/root.crt",rootCertificate)||!route(plainServer,"/favicon.ico",favicon)||
+       !route(plainServer,"/ws",ws,true)||!route(plainServer,"/api/state",stateGet)) {
         if(plainServer)httpd_stop(plainServer);plainServer=nullptr;
         httpd_ssl_stop(secureServer);secureServer=nullptr;return false;
     }

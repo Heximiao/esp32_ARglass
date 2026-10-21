@@ -1,6 +1,7 @@
 #include "CastService.h"
 #include "CastServer.h"
 #include "WifiScan.h"
+#include "StreamTiming.h"
 #include "../ui/DisplayPort.h"
 #include <WiFi.h>
 #include <ESPmDNS.h>
@@ -27,14 +28,18 @@ Preferences storage;
 bool storageOpen=false, initialized=false, netStarted=false, apStarted=false, mdnsStarted=false;
 bool wifiPending=false, configDirty=false;
 NetworkMode preferredMode=NetworkMode::AccessPoint;
-char pendingSsid[33]={}, pendingPassword[65]={}, pairing[7]={};
+char pendingSsid[33]={}, pendingPassword[65]={};
 String apName, apPassword;
 String joiningSsid, joiningPassword;
 bool joining=false;
+bool autoWifiEnabled=true, wifiSetupActive=false;
+uint32_t lastWifiAttempt=0;
+constexpr uint32_t WifiRetryMs=30000;
 const char* networkStatus="OFFLINE";
 std::atomic<bool> enabled{false}, live{false}, stopRequested{false};
 std::atomic<uint32_t> received{0}, dropped{0}, errors{0}, actualFps10{0}, lastReceive{0};
 uint32_t arrivalOrder=0, connectAt=0, savedAt=0, frameAt=0, fpsAt=0, displayed=0;
+bool fpsSampleReady=false;
 
 bool allocate() {
     if (initialized) return true;
@@ -51,6 +56,8 @@ bool allocate() {
     return initialized;
 }
 void startAp() {
+    autoWifiEnabled=false;
+    WiFi.setAutoReconnect(false);
     WiFi.mode(WIFI_AP_STA);
     if (!apStarted) apStarted=WiFi.softAPConfig(IPAddress(192,168,4,1),IPAddress(192,168,4,1),IPAddress(255,255,255,0)) &&
         WiFi.softAP(apName.c_str(),apPassword.c_str(),1,false,2);
@@ -74,12 +81,14 @@ int drawJpeg(JPEGDRAW* block) {
 void fpsOverlay(uint16_t* pixels) {
     // Tiny native-pixel digits and FPS, avoiding a second LVGL full-frame flush.
     const uint16_t glyphs[]={0x7B6F,0x2492,0x73E7,0x73CF,0x5BC9,0x79CF,0x79EF,0x7249,0x7BEF,0x7BCF,
-                             0x79E4,0x7BE4,0x79CF}; // 3x5, digits / F / P / S
-    char text[16]; snprintf(text,sizeof(text),"%uFPS",unsigned((actualFps10.load()+5)/10));
+                             0x79E4,0x7BE4,0x79CF,0x01C0}; // digits / F / P / S / dash
+    char text[16];
+    if(fpsSampleReady)snprintf(text,sizeof(text),"%uFPS",unsigned((actualFps10.load()+5)/10));
+    else strcpy(text,"--FPS"); // No completed measurement window yet; not a real 0 FPS.
     const int x0=ui::viewport::Width-int(strlen(text))*8-4;
     for (int y=0;y<14;++y) for(int x=x0-2;x<int(ui::viewport::Width);++x) pixels[y*ui::viewport::Width+x]=0;
     for (unsigned n=0;text[n];++n) {
-        const char c=text[n]; const unsigned index=c>='0'&&c<='9'?c-'0':c=='F'?10:c=='P'?11:12;
+        const char c=text[n]; const unsigned index=c>='0'&&c<='9'?c-'0':c=='F'?10:c=='P'?11:c=='S'?12:13;
         for(int y=0;y<5;++y) for(int x=0;x<3;++x) if(glyphs[index]&(1U<<(14-y*3-x)))
             for(int yy=0;yy<2;++yy) for(int xx=0;xx<2;++xx)
                 pixels[(2+y*2+yy)*ui::viewport::Width+x0+n*8+x*2+xx]=0xFFFF;
@@ -100,7 +109,9 @@ void begin(St7789& screen) {
     const uint32_t identity=uint32_t(ESP.getEfuseMac());
     char name[28]; snprintf(name,sizeof(name),"AR-Glass-%04X",unsigned(identity&0xffff)); apName=name;
     char password[20]; snprintf(password,sizeof(password),"glass-%08x",unsigned(esp_random())); apPassword=password;
-    snprintf(pairing,sizeof(pairing),"%06u",unsigned(esp_random()%1000000));
+    // Queue only: connecting stays in tick(), so boot/UI are never blocked.
+    lastWifiAttempt=millis();
+    reconnectWifi();
 }
 Options options() { portENTER_CRITICAL(&mux); Options copy=config; portEXIT_CRITICAL(&mux); return copy; }
 void setOptions(const Options& value) {
@@ -112,6 +123,7 @@ void setOptions(const Options& value) {
 }
 bool start(NetworkMode mode) {
     preferredMode=mode;
+    if(mode==NetworkMode::Station){autoWifiEnabled=true;WiFi.setAutoReconnect(true);}
     if(!allocate()) { networkStatus="PSRAM ALLOCATION FAILED"; return false; }
     if(!netStarted) {
         WiFi.persistent(false); WiFi.setHostname("ar-glass"); WiFi.setAutoReconnect(true);
@@ -120,8 +132,9 @@ bool start(NetworkMode mode) {
             const String ssid=storageOpen?storage.getString("ssid",""):String();
             if(ssid.isEmpty()) { networkStatus="SELECT WIFI FIRST"; return false; }
             else {
-                WiFi.enableSTA(true); if(WiFi.status()!=WL_CONNECTED) WiFi.begin(ssid.c_str(),storage.getString("password","").c_str());
-                networkStatus="CONNECTING WIFI"; connectAt=millis();
+                WiFi.enableSTA(true);
+                if(!wifiConnected() && !wifiConnecting())reconnectWifi();
+                networkStatus=wifiConnected()?"WIFI CONNECTED":"CONNECTING WIFI";
             }
         }
         WiFi.setSleep(false); esp_wifi_set_ps(WIFI_PS_NONE);
@@ -130,11 +143,12 @@ bool start(NetworkMode mode) {
     } else if(mode==NetworkMode::AccessPoint) startAp();
     else if(WiFi.status()!=WL_CONNECTED) {
         const String ssid=storageOpen?storage.getString("ssid",""):String();
-        if(!ssid.isEmpty()) { WiFi.begin(ssid.c_str(),storage.getString("password","").c_str()); connectAt=millis(); networkStatus="CONNECTING WIFI"; }
+        if(!ssid.isEmpty()) { if(!wifiConnecting())reconnectWifi(); networkStatus="CONNECTING WIFI"; }
         else { networkStatus="SELECT WIFI FIRST"; return false; }
     }
     clearReady(); stopRequested.store(false);
     received.store(0);dropped.store(0);errors.store(0);actualFps10.store(0);
+    fpsSampleReady=false;
     setAccepting(true); return true;
 }
 void setAccepting(bool value) {
@@ -144,23 +158,34 @@ void setAccepting(bool value) {
 bool accepting(){return enabled.load();}
 bool streaming(){return live.load();}
 bool running(){return netStarted;}
-const char* pin(){return pairing;}
 const char* status(){return networkStatus;}
 String address(){return preferredMode==NetworkMode::Station && WiFi.status()==WL_CONNECTED?
     String("https://ar-glass.local"):apStarted?String("https://192.168.4.1"):String("https://ar-glass.local");}
 String hotspotName(){return apStarted && preferredMode==NetworkMode::AccessPoint?apName:String();}
 String hotspotPassword(){return apStarted?apPassword:String();}
-bool wifiConnected(){return WiFi.status()==WL_CONNECTED && !joining;}
+bool wifiConnected(){return WiFi.status()==WL_CONNECTED && !joining && uint32_t(WiFi.localIP())!=0;}
 bool wifiConnecting(){portENTER_CRITICAL(&mux);bool pending=wifiPending;portEXIT_CRITICAL(&mux);return joining || pending;}
 String wifiName(){return WiFi.status()==WL_CONNECTED?WiFi.SSID():joiningSsid;}
+String localIp(){
+    if(!wifiConnected())return String();
+    const IPAddress ip=WiFi.localIP();
+    return uint32_t(ip)?ip.toString():String();
+}
 String savedWifiName(){return storageOpen?storage.getString("ssid",""):String();}
 bool reconnectWifi(){
     const String name=savedWifiName();
     return !name.isEmpty() && queueWifi(name.c_str(),storage.getString("password","").c_str());
 }
 void cancelWifi(){
+    lastWifiAttempt=millis();
     portENTER_CRITICAL(&mux); wifiPending=false; memset(pendingPassword,0,sizeof(pendingPassword)); portEXIT_CRITICAL(&mux);
     if(joining){WiFi.disconnect();joining=false;joiningPassword="";connectAt=0;networkStatus="WIFI CANCELLED";}
+}
+void setWifiSetupActive(bool active){
+    wifiSetupActive=active;
+    if(active)cancelWifi();
+    else lastWifiAttempt=millis();
+    WiFi.setAutoReconnect(!active && autoWifiEnabled);
 }
 bool queueWifi(const char* ssid,const char* password) {
     if(!ssid || !password || strlen(ssid)<1 || strlen(ssid)>32 || strlen(password)>64) return false;
@@ -211,8 +236,9 @@ void tick() {
         storage.putUChar("quality",o.quality); storage.putBool("fill",o.fill); storage.putBool("info",o.showFps); savedAt=now;
     }
     if(changeWifi) {
+        autoWifiEnabled=true;lastWifiAttempt=now;
         joiningSsid=ssid; joiningPassword=password; joining=true; preferredMode=NetworkMode::Station;
-        WiFi.persistent(false); WiFi.setHostname("ar-glass"); WiFi.setAutoReconnect(true);
+        WiFi.persistent(false); WiFi.setHostname("ar-glass"); WiFi.setAutoReconnect(!wifiSetupActive);
         WiFi.enableSTA(true); WiFi.disconnect(); WiFi.begin(ssid,password);
         WiFi.setSleep(false); connectAt=now; networkStatus="CONNECTING WIFI";
         memset(password,0,sizeof(password));
@@ -225,6 +251,11 @@ void tick() {
             WiFi.disconnect();joiningPassword="";joining=false;connectAt=0;networkStatus="WIFI FAILED";
         }
     }
+    if(autoWifiEnabled && !wifiSetupActive && !wifiConnected() && !wifiConnecting() &&
+       !networks::scanning() && uint32_t(now-lastWifiAttempt)>=WifiRetryMs){
+        lastWifiAttempt=now;
+        reconnectWifi();
+    }
     if(netStarted) {
         if(!joining && WiFi.status()==WL_CONNECTED) {networkStatus="WIFI CONNECTED";connectAt=0;}
         else if(!joining && connectAt && uint32_t(now-connectAt)>20000) {
@@ -235,8 +266,12 @@ void tick() {
             if(mdnsStarted) MDNS.addService("https","tcp",443);
         }
     }
-    if(stopRequested.exchange(false) || (live.load() && uint32_t(now-lastReceive.load())>2000)) {
-        live.store(false); actualFps10.store(0); clearReady(); ui::setVideoMode(false);
+    // Read activity before taking a fresh clock sample. The top-of-loop `now`
+    // may precede a frame received concurrently while Wi-Fi/NVS work was running.
+    const uint32_t receivedAt=lastReceive.load();
+    if(stopRequested.exchange(false) || (live.load() && timing::idle(millis(),receivedAt))) {
+        live.store(false); actualFps10.store(0); fpsSampleReady=false;
+        clearReady(); ui::setVideoMode(false);
     }
     if(!accepting()) return;
     const auto o=options();
@@ -264,13 +299,19 @@ void tick() {
         }
     } else if(okay) pixels=reinterpret_cast<uint16_t*>(slot.data+HeaderBytes);
     if(okay) {
-        if(!live.exchange(true)) { fpsAt=now; displayed=0; }
         ui::setVideoMode(true);
         if(o.showFps) fpsOverlay(pixels);
         okay=display->drawRect(ui::viewport::Left,ui::viewport::Top,ui::viewport::Width,ui::viewport::Height,pixels)==ESP_OK;
-        frameAt=now;
-        if(okay) ++displayed;
-        if(uint32_t(now-fpsAt)>=1000) {actualFps10.store(displayed*10000/(now-fpsAt));displayed=0;fpsAt=now;}
+        const uint32_t presentedAt=millis();
+        frameAt=presentedAt;
+        if(okay){
+            if(!live.exchange(true)) { fpsAt=presentedAt; displayed=0; }
+            ++displayed;
+            if(uint32_t(presentedAt-fpsAt)>=1000) {
+                actualFps10.store(displayed*10000/(presentedAt-fpsAt));
+                displayed=0;fpsAt=presentedAt;fpsSampleReady=true;
+            }
+        }else if(!live.load())ui::setVideoMode(false);
     }
     if(!okay) errors.fetch_add(1);
     cancelFrame(selected);
